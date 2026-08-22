@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: casefile-deception-online
+    runtime: node
+    plan: free
+    buildCommand: base64 -d project.b64 > project.zip && unzip -o project.zip && cd deception-online && npm install
+    startCommand: cd deception-online && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
