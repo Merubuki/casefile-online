@@ -1,12 +1,12 @@
 {
-  "name": "deception-casefile-online",
-  "version": "1.1.0",
+  "name": "casefile-online-tabletop-live",
+  "version": "4.0.0",
   "private": true,
-  "description": "Invite-code online social deduction game with human-like bot players.",
-  "main": "server-v3.js",
+  "description": "Tabletop-style online social deduction game with invite rooms and human-like bots.",
+  "main": "server-live.js",
   "scripts": {
-    "start": "node server-v3.js",
-    "dev": "node --watch server-v3.js"
+    "start": "node server-live.js",
+    "dev": "node --watch server-live.js"
   },
   "dependencies": {
     "express": "^4.21.2",
