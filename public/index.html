@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080b10">
+  <title>Casefile Online</title>
+  <meta name="description" content="A private invite-code social deduction game for friends.">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+  <main id="app" class="app-shell" aria-live="polite">
+    <section class="loading-card">
+      <div class="eyebrow">CASEFILE ONLINE</div>
+      <h1>Opening the case…</h1>
+      <p>Connecting to the multiplayer server.</p>
+    </section>
+  </main>
+  <div id="toast" class="toast" hidden></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>
