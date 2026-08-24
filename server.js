@@ -1,25 +1,322 @@
-const express=require('express'),http=require('http'),crypto=require('crypto');
-const{Server}=require('socket.io');const app=express(),srv=http.createServer(app),io=new Server(srv);const rooms=new Map(),PORT=process.env.PORT||3000;
-const ev=['receipt','access card','alarm clock','antique coin','ashes','backpack','bandage','battery','button','boarding pass','business card','camera','candle','car key','chewing gum','coffee cup','concert ticket','credit card','diary','glove','envelope','eyeglasses','feather','flash drive','flower petal','footprint','fountain pen','glass fragment','hair strand','handkerchief','hotel keycard','id badge','keychain','lighter','lottery ticket','map','matchbook','medicine bottle','metro ticket','movie stub','name tag','newspaper clipping','notebook','parking ticket','passport photo','pendant','phone charger','playing card','postcard','power bank','printed email','rubber band','safety pin','scarf','shopping list','sim card','sunglasses','train ticket','usb cable','wallet photo','watch strap','work permit'];
-const me=['baseball bat','blunt stone','boiling liquid','broken bottle','cable strangulation','carbon monoxide','chemical burn','choking','crowbar','drowning','electric shock','falling object','fire','heavy statue','hunting knife','ice pick','injection','kitchen knife','metal pipe','poisoned drink','poisoned food','razor blade','rope','scissors','screwdriver','sharp glass','overdose','smoke inhalation','steel bar','suffocation','toxic gas','vehicle impact','wrench','acid','brick','car crash','hammer','live wire','nail gun','plastic wrap','pushed downstairs','rock','sedative','shovel','smothering'];
-const tiles=[['Cause of Death',['Suffocation','Severe injury','Blood loss','Illness','Poisoning','Accident']],['Location',['Restaurant','Hotel','Hospital','Construction site','Bookstore','Bar']],['Corpse Condition',['Warm','Stiff','Decayed','Incomplete','Intact','Twisted']],['Time of Day',['Dawn','Morning','Noon','Afternoon','Evening','Midnight']],['Trace',['Powder','Liquid','Fiber','Print','Residue','None']],['Motive',['Money','Jealousy','Revenge','Fear','Secret','Unknown']]];
-const id=()=>crypto.randomBytes(6).toString('hex'),sh=a=>a.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
-function code(){let s;do{s='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'.split('').sort(()=>Math.random()-.5).slice(0,6).join('')}while(rooms.has(s));return s}
-function pub(r,p){let priv={role:p.role};if(['Murderer','Forensic Scientist'].includes(p.role)&&r.sol)priv.sol=r.sol;if(p.role==='Accomplice')priv.murderer=r.murderer;if(p.role==='Witness')priv.suspects=[r.murderer,r.accomplice].filter(Boolean);return{code:r.code,phase:r.phase,round:r.round,host:r.host,me:p.id,players:r.players.map(x=>({id:x.id,name:x.name,role:r.phase==='ended'?x.role:null,badge:x.badge,cards:x.role==='Forensic Scientist'?[]:x.cards,means:x.role==='Forensic Scientist'?[]:x.means})),priv,scene:r.scene,winner:r.winner,log:r.log.slice(-40)}}
-function emit(r){r.players.forEach(p=>p.sid&&io.to(p.sid).emit('state',pub(r,p)))}function log(r,t){r.log.push(t)}
-function start(r){if(r.players.length<4)throw Error('Need at least 4 players');let a=sh(r.players.map(x=>x.id));r.forensic=a[0];r.murderer=a[1];if(r.players.length>=6){r.accomplice=a[2];r.witness=a[3]}r.players.forEach((p,i)=>{p.role=p.id===r.forensic?'Forensic Scientist':p.id===r.murderer?'Murderer':p.id===r.accomplice?'Accomplice':p.id===r.witness?'Witness':'Investigator';p.badge=false;p.cards=sh(ev).slice(i*4,i*4+4).map((x,j)=>({id:'e'+p.id+j,t:x}));p.means=sh(me).slice(i*4,i*4+4).map((x,j)=>({id:'m'+p.id+j,t:x}))});r.phase='crime';log(r,'Roles dealt. Murderer is choosing the crime.');emit(r)}
-function roomFor(s,c){let r=rooms.get(c);if(!r)throw Error('Room not found');let p=r.players.find(x=>x.sid===s.id);if(!p)throw Error('Not in room');return[r,p]}
-io.on('connection',s=>{
- s.on('create',(name,cb)=>{name=(name||'Player').slice(0,20);let c=code(),p={id:id(),sid:s.id,name};let r={code:c,host:p.id,players:[p],phase:'lobby',round:0,scene:[],log:[name+' created the room']};rooms.set(c,r);s.join(c);cb({ok:1,code:c});emit(r)});
- s.on('join',(d,cb)=>{try{let r=rooms.get((d.code||'').toUpperCase());if(!r||r.phase!=='lobby')throw Error('Room unavailable');let p={id:id(),sid:s.id,name:(d.name||'Player').slice(0,20)};r.players.push(p);s.join(r.code);log(r,p.name+' joined');cb({ok:1,code:r.code});emit(r)}catch(e){cb({error:e.message})}});
- s.on('start',c=>{try{let[r,p]=roomFor(s,c);if(p.id!==r.host)throw Error('Host only');start(r)}catch(e){s.emit('err',e.message)}});
- s.on('crime',d=>{try{let[r,p]=roomFor(s,d.code);if(r.phase!=='crime'||p.id!==r.murderer)throw Error('Murderer only');let e=p.cards.find(x=>x.id===d.e),m=p.means.find(x=>x.id===d.m);if(!e||!m)throw Error('Choose your cards');r.sol={owner:p.id,e:e.id,m:m.id,et:e.t,mt:m.t};r.scene=tiles.map((x,i)=>({id:i,title:x[0],opts:x[1],mark:null}));r.phase='forensic';log(r,'Crime committed. Forensic Scientist is placing clues.');emit(r)}catch(e){s.emit('err',e.message)}});
- s.on('mark',d=>{try{let[r,p]=roomFor(s,d.code);if(r.phase!=='forensic'||p.id!==r.forensic)throw Error('Forensic Scientist only');let t=r.scene[d.i];if(!t||t.mark||!t.opts.includes(d.v))throw Error('Invalid marker');t.mark=d.v;if(r.scene.every(x=>x.mark)){r.phase='discussion';r.round=1;log(r,'All scene markers placed. Discussion open.')}emit(r)}catch(e){s.emit('err',e.message)}});
- s.on('next',c=>{try{let[r,p]=roomFor(s,c);if(p.id!==r.host&&p.id!==r.forensic)throw Error('Host or Forensic only');if(r.phase!=='discussion')throw Error('Not now');if(r.round<3){r.round++;let pool=tiles.slice(2);let x=sh(pool)[0],idx=2+Math.floor(Math.random()*4);r.scene[idx]={id:idx,title:x[0],opts:x[1],mark:null};r.phase='forensic';log(r,'Round '+r.round+': one scene clue was replaced.')}else{r.phase='final';log(r,'Final discussion. Use your solve badge.')}emit(r)}catch(e){s.emit('err',e.message)}});
- s.on('accuse',d=>{try{let[r,p]=roomFor(s,d.code);if(!['discussion','final','forensic'].includes(r.phase)||p.role==='Forensic Scientist'||p.badge)throw Error('No solve badge available');let t=r.players.find(x=>x.id===d.target),e=t&&t.cards.find(x=>x.id===d.e),m=t&&t.means.find(x=>x.id===d.m);if(!e||!m)throw Error('Select a suspect, evidence and means');p.badge=true;if(r.sol.owner===t.id&&r.sol.e===e.id&&r.sol.m===m.id){if(r.witness){r.phase='reversal';log(r,p.name+' solved the crime. Murderer gets one Witness guess.')}else{r.phase='ended';r.winner='Investigators';log(r,'Investigators win!')}}else{log(r,p.name+' accused incorrectly.');let eligible=r.players.filter(x=>x.role!=='Forensic Scientist');if(eligible.every(x=>x.badge)){r.phase='ended';r.winner='Murderer Team';log(r,'All solve badges are spent.')}}emit(r)}catch(e){s.emit('err',e.message)}});
- s.on('guess',d=>{try{let[r,p]=roomFor(s,d.code);if(r.phase!=='reversal'||p.id!==r.murderer)throw Error('Murderer only');r.phase='ended';r.winner=d.target===r.witness?'Murderer Team':'Investigators';log(r,r.winner+' win!');emit(r)}catch(e){s.emit('err',e.message)}});
- s.on('chat',d=>{try{let[r,p]=roomFor(s,d.code);if(p.role==='Forensic Scientist'&&r.phase!=='lobby')throw Error('Forensic Scientist must stay silent');let t=(d.text||'').trim().slice(0,200);if(t){log(r,p.name+': '+t);emit(r)}}catch(e){s.emit('err',e.message)}});
- s.on('disconnect',()=>{for(let r of rooms.values()){let p=r.players.find(x=>x.sid===s.id);if(p){p.sid=null;emit(r);break}}});
+const express = require('express');
+const http = require('http');
+const crypto = require('crypto');
+const path = require('path');
+const { Server } = require('socket.io');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: '*' } });
+const PORT = process.env.PORT || 3000;
+const rooms = new Map();
+
+const EVIDENCE = [
+  'receipt','access card','alarm clock','antique coin','ashes','backpack','bandage','battery','button','boarding pass','business card','camera','candle','car key','chewing gum','coffee cup','concert ticket','credit card','diary','glove','envelope','eyeglasses','feather','flash drive','flower petal','footprint','fountain pen','glass fragment','hair strand','handkerchief','hotel keycard','id badge','keychain','lighter','lottery ticket','map','matchbook','medicine bottle','metro ticket','movie stub','name tag','newspaper clipping','notebook','parking ticket','passport photo','pendant','phone charger','playing card','postcard','power bank','printed email','rubber band','safety pin','scarf','shopping list','sim card','sunglasses','train ticket','usb cable','wallet photo','watch strap','work permit','keyring','necklace','broken watch','theater ticket','ripped note','plastic card','coin purse','pen cap','paper clip','souvenir','photo strip'
+];
+
+const MEANS = [
+  'baseball bat','blunt stone','boiling liquid','broken bottle','cable strangulation','carbon monoxide','chemical burn','choking','crowbar','drowning','electric shock','falling object','fire','heavy statue','hunting knife','ice pick','injection','kitchen knife','metal pipe','poisoned drink','poisoned food','razor blade','rope','scissors','screwdriver','sharp glass','overdose','smoke inhalation','steel bar','suffocation','toxic gas','vehicle impact','wrench','acid','brick','car crash','hammer','live wire','nail gun','plastic wrap','pushed downstairs','rock','sedative','shovel','smothering','heavy book','metal cable','cleaning chemical','fall from height','crushing impact','heated object','wooden club','wire','gas leak','medication mix','sharp tool','industrial machine'
+];
+
+const FIXED_TILES = [
+  { title: 'Cause of Death', options: ['Suffocation','Severe Injury','Blood Loss','Illness','Poisoning','Accident'] },
+  { title: 'Location of Crime', options: ['Restaurant','Hotel','Hospital','Construction Site','Bookstore','Bar'] }
+];
+
+const SCENE_POOL = [
+  { title: 'Corpse Condition', options: ['Warm','Stiff','Decayed','Incomplete','Intact','Twisted'] },
+  { title: 'Time of Day', options: ['Dawn','Morning','Noon','Afternoon','Evening','Midnight'] },
+  { title: 'Trace at Scene', options: ['Powder','Liquid','Fiber','Print','Residue','None'] },
+  { title: 'Motive', options: ['Money','Jealousy','Revenge','Fear','Secret','Unknown'] },
+  { title: 'Weather', options: ['Clear','Cloudy','Rain','Storm','Windy','Humid'] },
+  { title: 'Victim Clothing', options: ['Formal','Casual','Uniform','Nightwear','Sportswear','Damaged'] },
+  { title: 'Sound Nearby', options: ['Argument','Crash','Music','Alarm','Footsteps','Silence'] },
+  { title: 'General Impression', options: ['Planned','Sudden','Personal','Messy','Professional','Desperate'] },
+  { title: 'Body Position', options: ['Face Up','Face Down','Seated','Curled','Hanging','Hidden'] },
+  { title: 'Suspicious Item', options: ['Food','Drink','Medicine','Tool','Device','Document'] },
+  { title: 'Crime Timing', options: ['Minutes Ago','Within Hour','Several Hours','Yesterday','Days Ago','Unclear'] },
+  { title: 'Scene Condition', options: ['Clean','Disturbed','Burned','Wet','Dark','Crowded'] }
+];
+
+const randomId = (bytes = 8) => crypto.randomBytes(bytes).toString('hex');
+function shuffle(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+function makeRoomCode() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code;
+  do code = Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+  while (rooms.has(code));
+  return code;
+}
+function safeName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').slice(0, 24) || 'Player';
+}
+function addLog(room, text, type = 'system') {
+  room.log.push({ id: randomId(4), text, type, at: Date.now() });
+  if (room.log.length > 80) room.log.splice(0, room.log.length - 80);
+}
+function newSceneTile(tile, slot, fixed = false) {
+  return { slot, fixed, title: tile.title, options: [...tile.options], marker: null };
+}
+function buildInitialScene() {
+  const randomScenes = shuffle(SCENE_POOL).slice(0, 4);
+  return [newSceneTile(FIXED_TILES[0], 0, true), newSceneTile(FIXED_TILES[1], 1, true), ...randomScenes.map((tile, i) => newSceneTile(tile, i + 2))];
+}
+function getRoomPlayer(socket, code) {
+  const room = rooms.get(String(code || '').toUpperCase());
+  if (!room) throw new Error('Room not found.');
+  const player = room.players.find(p => p.socketId === socket.id);
+  if (!player) throw new Error('You are not connected to this room.');
+  return { room, player };
+}
+function privateState(room, player) {
+  const result = { role: player.role || null };
+  if ((player.role === 'Murderer' || player.role === 'Forensic Scientist') && room.solution) result.solution = room.solution;
+  if (player.role === 'Accomplice') result.murdererId = room.murdererId;
+  if (player.role === 'Witness') result.suspectIds = [room.murdererId, room.accompliceId].filter(Boolean);
+  if (room.phase === 'ended' && room.solution) result.solution = room.solution;
+  return result;
+}
+function publicState(room, player) {
+  return {
+    code: room.code, phase: room.phase, round: room.round, hostId: room.hostId, meId: player.id,
+    settings: room.settings,
+    players: room.players.map(p => ({
+      id: p.id, name: p.name, connected: Boolean(p.socketId), role: room.phase === 'ended' ? p.role : null,
+      solveUsed: Boolean(p.solveUsed), evidence: p.role === 'Forensic Scientist' ? [] : p.evidence,
+      means: p.role === 'Forensic Scientist' ? [] : p.means
+    })),
+    private: privateState(room, player), scene: room.scene, winner: room.winner,
+    endingReason: room.endingReason, log: room.log, solvedBy: room.solvedBy || null
+  };
+}
+function emitRoom(room) {
+  for (const player of room.players) if (player.socketId) io.to(player.socketId).emit('state', publicState(room, player));
+}
+function assignCards(room) {
+  const evidenceDeck = shuffle(EVIDENCE);
+  const meansDeck = shuffle(MEANS);
+  const count = room.settings.cardsPerType;
+  let eIndex = 0, mIndex = 0;
+  for (const player of room.players) {
+    if (player.role === 'Forensic Scientist') { player.evidence = []; player.means = []; continue; }
+    player.evidence = evidenceDeck.slice(eIndex, eIndex + count).map((text, i) => ({ id: `e_${player.id}_${i}`, text }));
+    player.means = meansDeck.slice(mIndex, mIndex + count).map((text, i) => ({ id: `m_${player.id}_${i}`, text }));
+    eIndex += count; mIndex += count;
+  }
+}
+function startGame(room) {
+  if (room.players.length < 4) throw new Error('At least 4 players are required.');
+  const ids = shuffle(room.players.map(p => p.id));
+  room.forensicId = ids[0]; room.murdererId = ids[1];
+  room.accompliceId = room.players.length >= 6 ? ids[2] : null;
+  room.witnessId = room.players.length >= 6 ? ids[3] : null;
+  for (const player of room.players) {
+    if (player.id === room.forensicId) player.role = 'Forensic Scientist';
+    else if (player.id === room.murdererId) player.role = 'Murderer';
+    else if (player.id === room.accompliceId) player.role = 'Accomplice';
+    else if (player.id === room.witnessId) player.role = 'Witness';
+    else player.role = 'Investigator';
+    player.solveUsed = false;
+  }
+  assignCards(room);
+  Object.assign(room, { phase: 'crime', round: 0, scene: [], solution: null, winner: null, endingReason: null, solvedBy: null, usedSceneTitles: [] });
+  addLog(room, 'Roles have been dealt. The Murderer is secretly choosing the crime.');
+}
+function resetForRematch(room) {
+  Object.assign(room, { phase: 'lobby', round: 0, scene: [], solution: null, winner: null, endingReason: null, solvedBy: null, forensicId: null, murdererId: null, accompliceId: null, witnessId: null, usedSceneTitles: [] });
+  for (const p of room.players) Object.assign(p, { role: null, solveUsed: false, evidence: [], means: [] });
+  addLog(room, 'Rematch lobby opened.');
+}
+function allInvestigatorsSpent(room) {
+  return room.players.filter(p => p.role !== 'Forensic Scientist').every(p => p.solveUsed);
+}
+
+io.on('connection', socket => {
+  socket.on('createRoom', (payload, callback = () => {}) => {
+    try {
+      const name = safeName(payload?.name), code = makeRoomCode(), token = randomId(16);
+      const player = { id: randomId(), token, socketId: socket.id, name, role: null, solveUsed: false, evidence: [], means: [] };
+      const room = { code, hostId: player.id, players: [player], phase: 'lobby', round: 0, scene: [], solution: null, winner: null, endingReason: null, solvedBy: null, forensicId: null, murdererId: null, accompliceId: null, witnessId: null, usedSceneTitles: [], settings: { cardsPerType: 4 }, log: [] };
+      rooms.set(code, room); socket.join(code); addLog(room, `${name} created the room.`);
+      callback({ ok: true, code, token, playerId: player.id }); emitRoom(room);
+    } catch (err) { callback({ ok: false, error: err.message }); }
+  });
+
+  socket.on('joinRoom', (payload, callback = () => {}) => {
+    try {
+      const code = String(payload?.code || '').trim().toUpperCase(), room = rooms.get(code);
+      if (!room) throw new Error('Room code not found.');
+      if (room.phase !== 'lobby') throw new Error('This game has already started.');
+      if (room.players.length >= 12) throw new Error('This room is full.');
+      const name = safeName(payload?.name);
+      if (room.players.some(p => p.name.toLowerCase() === name.toLowerCase())) throw new Error('That name is already being used in this room.');
+      const token = randomId(16);
+      const player = { id: randomId(), token, socketId: socket.id, name, role: null, solveUsed: false, evidence: [], means: [] };
+      room.players.push(player); socket.join(code); addLog(room, `${name} joined the room.`);
+      callback({ ok: true, code, token, playerId: player.id }); emitRoom(room);
+    } catch (err) { callback({ ok: false, error: err.message }); }
+  });
+
+  socket.on('resumeRoom', (payload, callback = () => {}) => {
+    try {
+      const code = String(payload?.code || '').trim().toUpperCase(), room = rooms.get(code);
+      if (!room) throw new Error('Room no longer exists.');
+      const player = room.players.find(p => p.token === payload?.token);
+      if (!player) throw new Error('Could not restore this player.');
+      player.socketId = socket.id; socket.join(code); callback({ ok: true, code, playerId: player.id }); emitRoom(room);
+    } catch (err) { callback({ ok: false, error: err.message }); }
+  });
+
+  socket.on('leaveRoom', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code);
+      if (room.phase !== 'lobby') throw new Error('You cannot leave after the game has started.');
+      room.players = room.players.filter(p => p.id !== player.id); socket.leave(room.code);
+      if (!room.players.length) return rooms.delete(room.code);
+      if (room.hostId === player.id) room.hostId = room.players[0].id;
+      addLog(room, `${player.name} left the room.`); emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('updateSettings', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code);
+      if (player.id !== room.hostId) throw new Error('Only the host can change settings.');
+      if (room.phase !== 'lobby') throw new Error('Settings can only be changed in the lobby.');
+      const cards = Number(payload?.cardsPerType);
+      if (![3, 4, 5].includes(cards)) throw new Error('Invalid card count.');
+      room.settings.cardsPerType = cards; addLog(room, `Card count changed to ${cards} Evidence + ${cards} Means per player.`); emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('startGame', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code);
+      if (player.id !== room.hostId) throw new Error('Only the host can start the game.');
+      if (room.phase !== 'lobby') throw new Error('The game has already started.');
+      startGame(room); emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('chooseCrime', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code);
+      if (room.phase !== 'crime' || player.id !== room.murdererId) throw new Error('Only the Murderer can choose the crime right now.');
+      const evidence = player.evidence.find(c => c.id === payload?.evidenceId), means = player.means.find(c => c.id === payload?.meansId);
+      if (!evidence || !means) throw new Error('Choose one Evidence card and one Means card.');
+      room.solution = { ownerId: player.id, evidenceId: evidence.id, evidenceText: evidence.text, meansId: means.id, meansText: means.text };
+      room.scene = buildInitialScene(); room.usedSceneTitles = room.scene.map(t => t.title); room.phase = 'forensic';
+      addLog(room, 'The crime is locked in. The Forensic Scientist is placing scene markers.'); emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('placeMarker', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code);
+      if (room.phase !== 'forensic' || player.id !== room.forensicId) throw new Error('Only the Forensic Scientist can place markers.');
+      const tile = room.scene.find(t => t.slot === Number(payload?.slot));
+      if (!tile || tile.marker || !tile.options.includes(payload?.value)) throw new Error('Invalid marker choice.');
+      tile.marker = payload.value;
+      if (room.scene.every(t => t.marker)) {
+        if (room.round === 0) room.round = 1;
+        room.phase = 'discussion'; addLog(room, `Investigation Round ${room.round} begins. Discuss the clues and inspect every player's cards.`);
+      }
+      emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('advanceRound', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code);
+      if (room.phase !== 'discussion') throw new Error('The investigation is not ready to advance.');
+      if (player.id !== room.forensicId && player.id !== room.hostId) throw new Error('Only the Forensic Scientist or host can advance the round.');
+      if (room.round < 3) {
+        room.round += 1;
+        const available = SCENE_POOL.filter(t => !room.usedSceneTitles.includes(t.title));
+        const replacement = shuffle(available.length ? available : SCENE_POOL)[0];
+        const target = shuffle(room.scene.filter(t => !t.fixed))[0];
+        room.scene[room.scene.findIndex(t => t.slot === target.slot)] = newSceneTile(replacement, target.slot, false);
+        room.usedSceneTitles.push(replacement.title); room.phase = 'forensic';
+        addLog(room, `Round ${room.round}: one scene clue has been replaced. The Forensic Scientist must place the new marker.`);
+      } else {
+        room.phase = 'final'; addLog(room, 'Final discussion. Any player with an unused Solve Crime badge may still accuse.');
+      }
+      emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('accuse', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code);
+      if (!['forensic','discussion','final'].includes(room.phase)) throw new Error('Accusations are not open right now.');
+      if (player.role === 'Forensic Scientist') throw new Error('The Forensic Scientist cannot accuse.');
+      if (player.solveUsed) throw new Error('You already used your Solve Crime badge.');
+      const target = room.players.find(p => p.id === payload?.targetId);
+      if (!target || target.role === 'Forensic Scientist') throw new Error('Choose a valid suspect.');
+      const evidence = target.evidence.find(c => c.id === payload?.evidenceId), means = target.means.find(c => c.id === payload?.meansId);
+      if (!evidence || !means) throw new Error('Choose one Evidence card and one Means card from the same suspect.');
+      player.solveUsed = true;
+      const correct = Boolean(room.solution && target.id === room.solution.ownerId && evidence.id === room.solution.evidenceId && means.id === room.solution.meansId);
+      if (correct) {
+        room.solvedBy = player.id;
+        if (room.witnessId) { room.phase = 'reversal'; addLog(room, `${player.name} solved the crime! The Murderer now gets one chance to identify the Witness.`); }
+        else { room.phase = 'ended'; room.winner = 'Investigators'; room.endingReason = `${player.name} identified the correct suspect, Evidence, and Means.`; addLog(room, 'Investigators win the case.'); }
+      } else {
+        addLog(room, `${player.name} used a Solve Crime badge — incorrect accusation.`);
+        if (allInvestigatorsSpent(room)) { room.phase = 'ended'; room.winner = 'Murderer Team'; room.endingReason = 'Every investigator spent their Solve Crime badge without finding the exact solution.'; addLog(room, 'All Solve Crime badges are spent. The Murderer Team wins.'); }
+      }
+      emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('guessWitness', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code);
+      if (room.phase !== 'reversal' || player.id !== room.murdererId) throw new Error('Only the Murderer can make the Witness guess.');
+      const target = room.players.find(p => p.id === payload?.targetId);
+      if (!target || target.role === 'Forensic Scientist') throw new Error('Choose a player.');
+      room.phase = 'ended';
+      if (target.id === room.witnessId) { room.winner = 'Murderer Team'; room.endingReason = `The Murderer correctly identified ${target.name} as the Witness.`; addLog(room, 'The Murderer found the Witness and steals the victory.'); }
+      else { room.winner = 'Investigators'; room.endingReason = 'The Murderer guessed the wrong Witness.'; addLog(room, 'The Witness stayed hidden. Investigators keep the victory.'); }
+      emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('chatMessage', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code), text = String(payload?.text || '').trim().slice(0, 280);
+      if (!text) return;
+      if (player.role === 'Forensic Scientist' && !['lobby','ended'].includes(room.phase)) throw new Error('The Forensic Scientist must communicate only through scene markers.');
+      addLog(room, `${player.name}: ${text}`, 'chat'); emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('rematch', payload => {
+    try {
+      const { room, player } = getRoomPlayer(socket, payload?.code);
+      if (room.phase !== 'ended') throw new Error('Finish the current game first.');
+      if (player.id !== room.hostId) throw new Error('Only the host can start a rematch lobby.');
+      resetForRematch(room); emitRoom(room);
+    } catch (err) { socket.emit('toast', { type: 'error', message: err.message }); }
+  });
+
+  socket.on('disconnect', () => {
+    for (const room of rooms.values()) {
+      const player = room.players.find(p => p.socketId === socket.id);
+      if (!player) continue;
+      player.socketId = null; addLog(room, `${player.name} disconnected. They can rejoin by reopening the same browser.`); emitRoom(room); break;
+    }
+  });
 });
-app.get('/health',(q,r)=>r.json({ok:true}));
-app.get('/',(q,r)=>r.send(`<!doctype html><html><head><meta name=viewport content="width=device-width,initial-scale=1"><title>Casefile Online</title><style>*{box-sizing:border-box}body{margin:0;background:#080a0f;color:#eef2f8;font-family:Arial,sans-serif}button,input{font:inherit}.wrap{max-width:1150px;margin:auto;padding:28px}.card{background:#111722;border:1px solid #253047;border-radius:18px;padding:20px;margin:14px 0}.row{display:flex;gap:10px;flex-wrap:wrap}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}.btn{background:#e3b341;color:#111;border:0;border-radius:11px;padding:12px 16px;font-weight:800;cursor:pointer}.alt{background:#263248;color:white}.danger{background:#9d3042;color:white}input{background:#0b1018;color:white;border:1px solid #34425b;border-radius:10px;padding:12px;width:100%}.muted{color:#9aa7b7}.tag{display:inline-block;background:#1c2635;padding:5px 9px;border-radius:999px;margin:3px}.sel{outline:2px solid #e3b341}.scene button{width:100%;margin:4px 0;text-align:left}.log{height:180px;overflow:auto;background:#090d14;padding:12px;border-radius:10px}.top{display:flex;justify-content:space-between;gap:14px;align-items:center}.role{font-size:30px;font-weight:900}.code{font-size:34px;letter-spacing:5px;font-weight:900}@media(max-width:650px){.wrap{padding:14px}.code{font-size:25px}}</style></head><body><div class=wrap><div id=app></div></div><script src=/socket.io/socket.io.js></script><script>const s=io(),A=document.querySelector('#app');let S=null,code='',sel={};const esc=x=>String(x||'').replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));function home(){A.innerHTML='<div class=card><h1>CASEFILE</h1><p class=muted>Online social deduction for you and your friends</p><input id=n placeholder="Your name"><div class=row style="margin-top:10px"><button class=btn onclick=create()>Create Room</button><input id=c placeholder="Invite code" style="max-width:180px"><button class="btn alt" onclick=join()>Join Room</button></div><p class=muted>4–12 players • private roles • invite-code rooms</p></div>'}function create(){s.emit('create',n.value,x=>{if(x.ok){code=x.code}})}function join(){s.emit('join',{name:n.value,code:c.value},x=>x.error?alert(x.error):code=x.code)}function render(){if(!S)return;code=S.code;let me=S.players.find(p=>p.id===S.me),host=S.me===S.host,role=S.priv.role||'Waiting';let h='<div class=top><div><div class=muted>ROOM</div><div class=code>'+S.code+'</div></div><div><div class=muted>YOUR ROLE</div><div class=role>'+esc(role)+'</div></div></div>';h+='<div class=card><div class=row>'+S.players.map(p=>'<span class=tag>'+esc(p.name)+(p.id===S.host?' ★':'')+(p.badge?' ✕':'')+'</span>').join('')+'</div>'+(S.phase==='lobby'&&host?'<button class=btn onclick="s.emit(\'start\',code)">Start Game</button>':'')+'</div>';if(S.phase==='crime'&&role==='Murderer')h+=pickCrime(me);if(S.phase==='forensic'&&role==='Forensic Scientist')h+=scene(true);else if(S.scene.length)h+=scene(false);if(['discussion','final','forensic'].includes(S.phase)&&role!=='Forensic Scientist')h+=accuse();if(S.phase==='discussion'&&(host||role==='Forensic Scientist'))h+='<div class=card><button class=btn onclick="s.emit(\'next\',code)">Advance Investigation Round</button></div>';if(S.phase==='reversal'&&role==='Murderer')h+=guess();if(S.phase==='ended')h+='<div class=card><h2>'+esc(S.winner)+' WIN</h2><p>Correct solution: '+esc(S.priv.sol?S.priv.sol.et+' + '+S.priv.sol.mt:'revealed to roles')+'</p></div>';h+='<div class=card><h3>Case Log / Chat</h3><div class=log>'+S.log.map(x=>'<div>'+esc(x)+'</div>').join('')+'</div><div class=row style="margin-top:8px"><input id=chat placeholder="Message"><button class="btn alt" onclick="send()">Send</button></div></div>';A.innerHTML=h;A.querySelector('.log').scrollTop=99999}function pickCrime(me){return '<div class=card><h2>Choose the secret crime</h2><p>Pick one Key Evidence and one Means of Murder from your cards.</p><div class=grid><div><h3>Evidence</h3>'+me.cards.map(x=>'<button class="btn alt '+(sel.e===x.id?'sel':'')+'" onclick="sel.e=\''+x.id+'\';render()">'+esc(x.t)+'</button>').join('')+'</div><div><h3>Means</h3>'+me.means.map(x=>'<button class="btn alt '+(sel.m===x.id?'sel':'')+'" onclick="sel.m=\''+x.id+'\';render()">'+esc(x.t)+'</button>').join('')+'</div></div><button class=btn onclick="s.emit(\'crime\',{code,e:sel.e,m:sel.m})">Commit Crime</button></div>'}function scene(active){return '<div class=card><h2>Forensic Scene — Round '+S.round+'</h2><div class=grid>'+S.scene.map((t,i)=>'<div class="card scene"><b>'+t.title+'</b><div>'+(t.mark?'<h3>'+esc(t.mark)+'</h3>':t.opts.map(v=>active?'<button class="btn alt" onclick="s.emit(\'mark\',{code,i:'+i+',v:\''+v.replace(/'/g,"\\'")+'\'})">'+esc(v)+'</button>':'<span class=muted>Waiting for marker…</span>').join(''))+'</div></div>').join('')+'</div></div>'}function accuse(){let suspects=S.players.filter(p=>p.role!=='Forensic Scientist');return '<div class=card><h2>Solve Crime</h2><p class=muted>Each player gets one attempt for the entire game.</p><div class=grid>'+suspects.map(p=>'<div class=card><b>'+esc(p.name)+'</b><div>Evidence</div>'+p.cards.map(x=>'<button class="btn alt '+(sel.e===x.id?'sel':'')+'" onclick="sel.t=\''+p.id+'\';sel.e=\''+x.id+'\';render()">'+esc(x.t)+'</button>').join('')+'<div>Means</div>'+p.means.map(x=>'<button class="btn alt '+(sel.m===x.id?'sel':'')+'" onclick="sel.t=\''+p.id+'\';sel.m=\''+x.id+'\';render()">'+esc(x.t)+'</button>').join('')+'</div>').join('')+'</div><button class="btn danger" onclick="s.emit(\'accuse\',{code,target:sel.t,e:sel.e,m:sel.m})">Use Solve Badge</button></div>'}function guess(){let x=S.players.filter(p=>p.id!==S.me);return '<div class=card><h2>Witness Reversal</h2><p>Guess who the Witness is. A correct guess steals the win.</p>'+x.map(p=>'<button class="btn danger" onclick="s.emit(\'guess\',{code,target:\''+p.id+'\'})">'+esc(p.name)+'</button>').join('')+'</div>'}function send(){s.emit('chat',{code,text:chat.value});chat.value=''}s.on('state',x=>{S=x;render()});s.on('err',alert);home();</script></body></html>`));srv.listen(PORT,()=>console.log('Casefile on '+PORT));
+
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/health', (_req, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+server.listen(PORT, '0.0.0.0', () => console.log(`Casefile Online listening on ${PORT}`));
