@@ -1,12 +1,12 @@
 {
   "name": "casefile-online-tabletop-live",
-  "version": "9.0.0",
+  "version": "10.0.0",
   "private": true,
-  "description": "Unreal-inspired cinematic detective tabletop social deduction game with invite rooms and smart forensic bots.",
-  "main": "server-v9-wrapper.js",
+  "description": "Art-first cinematic detective tabletop social deduction game with all public cards visible at once.",
+  "main": "server-v10-wrapper.js",
   "scripts": {
-    "start": "node server-v9-wrapper.js",
-    "dev": "node --watch server-v9-wrapper.js"
+    "start": "node server-v10-wrapper.js",
+    "dev": "node --watch server-v10-wrapper.js"
   },
   "dependencies": {
     "express": "^4.21.2",
