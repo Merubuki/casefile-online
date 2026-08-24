@@ -1,12 +1,12 @@
 {
   "name": "casefile-online-tabletop-live",
-  "version": "4.0.0",
+  "version": "7.0.0",
   "private": true,
-  "description": "Tabletop-style online social deduction game with invite rooms and human-like bots.",
-  "main": "server-live.js",
+  "description": "Tabletop-style online social deduction game with invite rooms, illustrated cards, and human-like bots.",
+  "main": "server-v7-wrapper.js",
   "scripts": {
-    "start": "node server-live.js",
-    "dev": "node --watch server-live.js"
+    "start": "node server-v7-wrapper.js",
+    "dev": "node --watch server-v7-wrapper.js"
   },
   "dependencies": {
     "express": "^4.21.2",
