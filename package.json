@@ -1,12 +1,12 @@
 {
   "name": "casefile-online-tabletop-live",
-  "version": "10.0.0",
+  "version": "11.0.0",
   "private": true,
-  "description": "Art-first cinematic detective tabletop social deduction game with all public cards visible at once.",
-  "main": "server-v10-wrapper.js",
+  "description": "Retro pixel-card-game Casefile Online UI with invite rooms and smart forensic bots.",
+  "main": "server-v11-wrapper.js",
   "scripts": {
-    "start": "node server-v10-wrapper.js",
-    "dev": "node --watch server-v10-wrapper.js"
+    "start": "node server-v11-wrapper.js",
+    "dev": "node --watch server-v11-wrapper.js"
   },
   "dependencies": {
     "express": "^4.21.2",
